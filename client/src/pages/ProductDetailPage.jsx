@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, imageUrl } from '../api/client.js';
 import { formatPrice } from '../utils/formatPrice.js';
@@ -14,12 +14,43 @@ export default function ProductDetailPage() {
   const [size, setSize] = useState('');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [added, setAdded] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
+  const buttonTimer = useRef(null);
+  const toastTimer = useRef(null);
+  const addLock = useRef(false);
   useEffect(() => { api(`/products/${id}`).then(setProduct).catch((err) => setError(err.message)); }, [id]);
+  useEffect(() => () => {
+    clearTimeout(buttonTimer.current);
+    clearTimeout(toastTimer.current);
+  }, []);
   async function addItem() {
     if (!user) { navigate('/login'); return; }
     if (!size) { setMessage('Choose a size to continue.'); return; }
-    try { await add(product._id, size); setMessage('Added to your bag.'); setError(''); }
-    catch (err) { setError(err.message); setMessage(''); }
+    if (addLock.current) return;
+    addLock.current = true;
+    clearTimeout(buttonTimer.current);
+    clearTimeout(toastTimer.current);
+    setAdding(true);
+    setAdded(true);
+    setMessage('');
+    setError('');
+    try {
+      await add(product._id, size);
+      setAdding(false);
+      setShowSuccess(true);
+      buttonTimer.current = setTimeout(() => {
+        addLock.current = false;
+        setAdded(false);
+      }, 5000);
+      toastTimer.current = setTimeout(() => setShowSuccess(false), 5000);
+    } catch (err) {
+      setAdding(false);
+      setAdded(false);
+      addLock.current = false;
+      setError(err.message);
+    }
   }
   if (error && !product) return <div className="container section notice">{error}</div>;
   if (!product) return <div className="loading">Loading product…</div>;
@@ -33,7 +64,8 @@ export default function ProductDetailPage() {
       <div className="size-grid">{product.sizes.map((item) => <button type="button" className={`size-button ${size === item ? 'selected' : ''}`} onClick={() => setSize(item)} key={item}>{item.replace('EU ', '')}</button>)}</div>
       <p className="muted">{product.stock > 0 ? `${product.stock} available` : 'Out of stock'}</p>
       {message && <p className="notice success">{message}</p>}{error && <p className="notice">{error}</p>}
-      <button className="button button-dark button-block" disabled={product.stock < 1} onClick={addItem}>{product.stock ? 'Add to Bag' : 'Out of Stock'}</button>
+      <button className="button button-dark button-block" disabled={product.stock < 1 || adding || added} onClick={addItem}>{product.stock < 1 ? 'Out of Stock' : added ? 'Added to Bag ✓' : 'Add to Bag'}</button>
+      {showSuccess && <p className="bag-toast" role="status" aria-live="polite">Added to Bag Successfully!</p>}
       <p className="muted" style={{ marginTop: 24 }}>Free delivery on qualifying orders. Easy returns within 30 days.</p>
       <Link to="/shop" className="muted">← Continue shopping</Link>
     </section>
