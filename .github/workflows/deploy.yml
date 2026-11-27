@@ -169,12 +169,20 @@ jobs:
             set -eu
             if ! sudo cloud-init status --wait; then
               sudo cloud-init status --long
-              for log in /var/log/user-data.log /var/log/cloud-init-output.log; do
+              for log in \
+                /var/log/user-data.log \
+                /var/log/cloud-init-output.log \
+                /var/log/cloud-init.log \
+                /var/log/syslog; do
                 if [ -f "$log" ]; then
                   echo "--- $log ---"
                   sudo tail -n 100 "$log"
                 fi
               done
+              if [ -f /var/lib/cloud/instance/scripts/part-001 ]; then
+                echo "--- /var/lib/cloud/instance/scripts/part-001 ---"
+                sudo sed -n '1,200p' /var/lib/cloud/instance/scripts/part-001
+              fi
               exit 1
             fi
 
