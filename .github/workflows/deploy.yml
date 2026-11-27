@@ -186,9 +186,50 @@ jobs:
               exit 1
             fi
 
+            if [ ! -d /var/www/app/.git ]; then
+              echo "/var/www/app is missing; printing bootstrap logs and running idempotent setup."
+              for log in /var/log/user-data.log /var/log/cloud-init-output.log; do
+                if [ -f "$log" ]; then
+                  echo "--- $log ---"
+                  sudo tail -n 50 "$log"
+                fi
+              done
+
+              sudo bash -euxo pipefail -c '
+                export DEBIAN_FRONTEND=noninteractive
+                export HOME=/root
+                if [ ! -f /swapfile ]; then
+                  fallocate -l 1G /swapfile
+                  chmod 600 /swapfile
+                  mkswap /swapfile
+                  swapon /swapfile
+                  echo "/swapfile none swap sw 0 0" >> /etc/fstab
+                fi
+                apt-get -o DPkg::Lock::Timeout=120 update -y
+                apt-get -o DPkg::Lock::Timeout=120 install -y ca-certificates curl git nginx
+                if ! command -v node >/dev/null 2>&1; then
+                  curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+                  apt-get -o DPkg::Lock::Timeout=120 install -y nodejs
+                fi
+                if ! command -v pm2 >/dev/null 2>&1; then
+                  npm install --global pm2
+                fi
+                rm -rf /var/www/app
+                mkdir -p /var/www
+                git clone https://github.com/kritikc171/SoleStride.git /var/www/app
+                chown -R ubuntu:ubuntu /var/www/app
+                pm2 startup systemd -u ubuntu --hp /home/ubuntu
+                systemctl enable nginx
+              '
+            fi
+
             cd /var/www/app
             git fetch origin main
             git reset --hard origin/main
+
+            sudo cp /var/www/app/infra/nginx.conf /etc/nginx/sites-available/solestride
+            sudo ln -sf /etc/nginx/sites-available/solestride /etc/nginx/sites-enabled/solestride
+            sudo rm -f /etc/nginx/sites-enabled/default
 
             cd /var/www/app/server
             npm ci --omit=dev
@@ -212,7 +253,7 @@ jobs:
             pm2 startOrReload ecosystem.config.cjs --update-env
             pm2 save
             sudo nginx -t
-            sudo systemctl reload nginx
+            sudo systemctl restart nginx
 
       - name: Revoke temporary SSH access
         if: always()
