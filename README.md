@@ -34,7 +34,7 @@ The deployment files in `infra/`, `server/ecosystem.config.cjs`, and `.github/wo
    - `AWS_ACCESS_KEY_ID`
    - `AWS_SECRET_ACCESS_KEY`
    - `AWS_SESSION_TOKEN` (needed for temporary AWS Learner Lab credentials; otherwise leave unset)
-   - `MONGO_URI` (your Atlas URI, e.g. `mongodb+srv://...`)
+   - `MONGO_URI` (preferred) or `MONGODB_URI` (accepted alias), containing your Atlas URI, e.g. `mongodb+srv://...`
    - `JWT_SECRET` (a long, randomly generated secret)
 3. Add the repository variable `AWS_REGION` with `us-east-1`, or your chosen supported region.
 4. The AWS credentials need permission to manage the CloudFormation stack and EC2 resources, read the generated SSM key parameter, and temporarily authorize/revoke SSH ingress on the stack's security group.

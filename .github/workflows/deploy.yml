@@ -46,6 +46,20 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Verify deployment secrets
+        env:
+          MONGO_URI: ${{ secrets.MONGO_URI || secrets.MONGODB_URI }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+        run: |
+          if [ -z "$MONGO_URI" ]; then
+            echo "Set the MONGO_URI or MONGODB_URI repository secret." >&2
+            exit 1
+          fi
+          if [ -z "$JWT_SECRET" ]; then
+            echo "Set the JWT_SECRET repository secret." >&2
+            exit 1
+          fi
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -143,7 +157,7 @@ jobs:
         uses: appleboy/ssh-action@v1.2.0
         env:
           EC2_IP: ${{ steps.instance.outputs.public_ip }}
-          MONGO_URI: ${{ secrets.MONGO_URI }}
+          MONGO_URI: ${{ secrets.MONGO_URI || secrets.MONGODB_URI }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
         with:
           host: ${{ steps.instance.outputs.public_ip }}
