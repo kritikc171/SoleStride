@@ -1,0 +1,210 @@
+name: Deploy SoleStride
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: solestride-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+  STACK_NAME: solestride-stack
+
+jobs:
+  build:
+    name: Build frontend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - name: Install dependencies and build
+        working-directory: client
+        run: |
+          npm ci
+          npm run build
+
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Create or update EC2 stack
+        run: |
+          aws cloudformation deploy \
+            --stack-name "$STACK_NAME" \
+            --template-file infra/ec2-instance.yaml \
+            --parameter-overrides InstanceType=t2.micro \
+            --no-fail-on-empty-changeset \
+            --region "$AWS_REGION"
+
+      - name: Read EC2 outputs
+        id: instance
+        run: |
+          IP=$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --region "$AWS_REGION" \
+            --query "Stacks[0].Outputs[?OutputKey=='PublicIP'].OutputValue" \
+            --output text)
+          KEY_PATH=$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --region "$AWS_REGION" \
+            --query "Stacks[0].Outputs[?OutputKey=='SSMKeyPath'].OutputValue" \
+            --output text)
+          SECURITY_GROUP_ID=$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --region "$AWS_REGION" \
+            --query "Stacks[0].Outputs[?OutputKey=='SecurityGroupId'].OutputValue" \
+            --output text)
+          echo "public_ip=$IP" >> "$GITHUB_OUTPUT"
+          echo "key_path=$KEY_PATH" >> "$GITHUB_OUTPUT"
+          echo "security_group_id=$SECURITY_GROUP_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Retrieve deployment key
+        run: |
+          aws ssm get-parameter \
+            --name "${{ steps.instance.outputs.key_path }}" \
+            --with-decryption \
+            --region "$AWS_REGION" \
+            --query 'Parameter.Value' \
+            --output text > /tmp/solestride-key.pem
+          chmod 600 /tmp/solestride-key.pem
+
+      - name: Allow this runner temporary SSH access
+        id: ssh-access
+        env:
+          SECURITY_GROUP_ID: ${{ steps.instance.outputs.security_group_id }}
+        run: |
+          RUNNER_IP=$(curl -fsS https://checkip.amazonaws.com | tr -d '\r\n')
+          echo "runner_ip=$RUNNER_IP" >> "$GITHUB_OUTPUT"
+
+          EXISTING_RULE=$(aws ec2 describe-security-groups \
+            --group-ids "$SECURITY_GROUP_ID" \
+            --region "$AWS_REGION" \
+            --output json | jq -r --arg cidr "$RUNNER_IP/32" \
+              '[.SecurityGroups[0].IpPermissions[]? | select(.FromPort == 22 and .ToPort == 22) | .IpRanges[]?.CidrIp | select(. == $cidr)] | length')
+          if [ "$EXISTING_RULE" -gt 0 ]; then
+            aws ec2 revoke-security-group-ingress \
+              --group-id "$SECURITY_GROUP_ID" \
+              --protocol tcp \
+              --port 22 \
+              --cidr "$RUNNER_IP/32" \
+              --region "$AWS_REGION"
+          fi
+
+          aws ec2 authorize-security-group-ingress \
+            --group-id "$SECURITY_GROUP_ID" \
+            --protocol tcp \
+            --port 22 \
+            --cidr "$RUNNER_IP/32" \
+            --region "$AWS_REGION"
+
+      - name: Wait for SSH
+        env:
+          EC2_IP: ${{ steps.instance.outputs.public_ip }}
+        run: |
+          for attempt in {1..36}; do
+            if nc -zw5 "$EC2_IP" 22 2>/dev/null; then
+              echo "SSH is available."
+              exit 0
+            fi
+            echo "Waiting for SSH ($attempt/36)..."
+            sleep 10
+          done
+          echo "SSH did not become available in time." >&2
+          exit 1
+
+      - name: Deploy application and restart services
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          EC2_IP: ${{ steps.instance.outputs.public_ip }}
+          MONGO_URI: ${{ secrets.MONGO_URI }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+        with:
+          host: ${{ steps.instance.outputs.public_ip }}
+          username: ubuntu
+          key_path: /tmp/solestride-key.pem
+          script_stop: true
+          envs: EC2_IP,MONGO_URI,JWT_SECRET
+          script: |
+            set -eu
+            sudo cloud-init status --wait
+
+            cd /var/www/app
+            git fetch origin main
+            git reset --hard origin/main
+
+            cd /var/www/app/server
+            npm ci --omit=dev
+            umask 077
+            printf '%s\n' \
+              "PORT=5000" \
+              "NODE_ENV=production" \
+              "CLIENT_ORIGIN=http://$EC2_IP" \
+              "MONGO_URI=$MONGO_URI" \
+              "JWT_SECRET=$JWT_SECRET" \
+              > .env
+
+            cd /var/www/app/client
+            npm ci
+            npm run build
+
+            cd /var/www/app/server
+            pm2 startOrReload ecosystem.config.cjs --update-env
+            pm2 save
+            sudo nginx -t
+            sudo systemctl reload nginx
+
+      - name: Revoke temporary SSH access
+        if: always()
+        env:
+          SECURITY_GROUP_ID: ${{ steps.instance.outputs.security_group_id }}
+          RUNNER_IP: ${{ steps.ssh-access.outputs.runner_ip }}
+        run: |
+          if [ -n "$SECURITY_GROUP_ID" ] && [ -n "$RUNNER_IP" ]; then
+            EXISTING_RULE=$(aws ec2 describe-security-groups \
+              --group-ids "$SECURITY_GROUP_ID" \
+              --region "$AWS_REGION" \
+              --output json | jq -r --arg cidr "$RUNNER_IP/32" \
+                '[.SecurityGroups[0].IpPermissions[]? | select(.FromPort == 22 and .ToPort == 22) | .IpRanges[]?.CidrIp | select(. == $cidr)] | length')
+            if [ "$EXISTING_RULE" -gt 0 ]; then
+              aws ec2 revoke-security-group-ingress \
+                --group-id "$SECURITY_GROUP_ID" \
+                --protocol tcp \
+                --port 22 \
+                --cidr "$RUNNER_IP/32" \
+                --region "$AWS_REGION"
+            fi
+          fi
+
+      - name: Remove temporary deployment key
+        if: always()
+        run: rm -f /tmp/solestride-key.pem
+
+      - name: Report deployment URL
+        run: echo "SoleStride is live at http://${{ steps.instance.outputs.public_ip }}"

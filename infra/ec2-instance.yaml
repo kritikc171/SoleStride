@@ -1,0 +1,91 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: SoleStride EC2 host with Nginx, Node.js, and PM2
+
+Parameters:
+  InstanceType:
+    Type: String
+    Default: t2.micro
+    Description: EC2 instance type
+  UbuntuAmi:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
+    Description: Latest Ubuntu 24.04 LTS AMI for this region
+  SSHLocation:
+    Type: String
+    Default: 127.0.0.1/32
+    Description: Baseline SSH CIDR; the workflow temporarily allows its runner IP
+  RepositoryUrl:
+    Type: String
+    Default: https://github.com/kritikc171/SoleStride.git
+    Description: Public Git repository cloned onto the EC2 instance
+
+Resources:
+  ServerKeyPair:
+    Type: AWS::EC2::KeyPair
+    Properties:
+      KeyName: !Sub '${AWS::StackName}-key'
+
+  ServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow HTTP and deployment SSH
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref SSHLocation
+
+  ServerInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref UbuntuAmi
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref ServerKeyPair
+      SecurityGroupIds:
+        - !GetAtt ServerSecurityGroup.GroupId
+      MetadataOptions:
+        HttpTokens: required
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-server'
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euxo pipefail
+          exec > /var/log/user-data.log 2>&1
+
+          apt-get update -y
+          apt-get install -y ca-certificates curl git nginx
+          curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+          apt-get install -y nodejs
+          npm install --global pm2
+
+          mkdir -p /var/www
+          git clone ${RepositoryUrl} /var/www/app
+          cp /var/www/app/infra/nginx.conf /etc/nginx/sites-available/solestride
+          ln -sf /etc/nginx/sites-available/solestride /etc/nginx/sites-enabled/solestride
+          rm -f /etc/nginx/sites-enabled/default
+          nginx -t
+
+          chown -R ubuntu:ubuntu /var/www/app
+          pm2 startup systemd -u ubuntu --hp /home/ubuntu
+          systemctl enable nginx
+          systemctl restart nginx
+
+Outputs:
+  PublicIP:
+    Description: EC2 public IP
+    Value: !GetAtt ServerInstance.PublicIp
+  SecurityGroupId:
+    Description: Security group used for temporary deployment SSH access
+    Value: !GetAtt ServerSecurityGroup.GroupId
+  PublicURL:
+    Description: SoleStride website URL
+    Value: !Sub 'http://${ServerInstance.PublicIp}'
+  SSMKeyPath:
+    Description: SSM Parameter Store path for the generated private key
+    Value: !Sub '/ec2/keypair/${ServerKeyPair.KeyPairId}'
