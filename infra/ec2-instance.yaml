@@ -57,11 +57,21 @@ Resources:
           #!/bin/bash
           set -euxo pipefail
           exec > /var/log/user-data.log 2>&1
+          export DEBIAN_FRONTEND=noninteractive
+          export HOME=/root
 
-          apt-get update -y
-          apt-get install -y ca-certificates curl git nginx
+          if [ ! -f /swapfile ]; then
+            fallocate -l 1G /swapfile
+            chmod 600 /swapfile
+            mkswap /swapfile
+            swapon /swapfile
+            echo '/swapfile none swap sw 0 0' >> /etc/fstab
+          fi
+
+          apt-get -o DPkg::Lock::Timeout=120 update -y
+          apt-get -o DPkg::Lock::Timeout=120 install -y ca-certificates curl git nginx
           curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-          apt-get install -y nodejs
+          apt-get -o DPkg::Lock::Timeout=120 install -y nodejs
           npm install --global pm2
 
           mkdir -p /var/www

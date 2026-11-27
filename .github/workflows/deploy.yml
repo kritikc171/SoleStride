@@ -168,7 +168,7 @@ jobs:
           script: |
             set -eu
             if ! sudo cloud-init status --wait; then
-              sudo cloud-init status --long
+              sudo cloud-init status --long || echo "cloud-init status is non-zero; collecting bootstrap logs."
               for log in \
                 /var/log/user-data.log \
                 /var/log/cloud-init-output.log \
@@ -192,18 +192,21 @@ jobs:
 
             cd /var/www/app/server
             npm ci --omit=dev
-            umask 077
-            printf '%s\n' \
-              "PORT=5000" \
-              "NODE_ENV=production" \
-              "CLIENT_ORIGIN=http://$EC2_IP" \
-              "MONGO_URI=$MONGO_URI" \
-              "JWT_SECRET=$JWT_SECRET" \
-              > .env
+            (
+              umask 077
+              printf '%s\n' \
+                "PORT=5000" \
+                "NODE_ENV=production" \
+                "CLIENT_ORIGIN=http://$EC2_IP" \
+                "MONGO_URI=$MONGO_URI" \
+                "JWT_SECRET=$JWT_SECRET" \
+                > .env
+            )
 
             cd /var/www/app/client
             npm ci
             npm run build
+            chmod -R a+rX /var/www/app/client/dist
 
             cd /var/www/app/server
             pm2 startOrReload ecosystem.config.cjs --update-env
