@@ -1,1 +1,21 @@
 
+name: Deploy SoleStride
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Deploy to AWS EC2
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deployment Started
+        run: echo "Starting SoleStride deployment..."
+
