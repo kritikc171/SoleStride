@@ -12,6 +12,8 @@ export default function ProductDetailPage() {
   const { add } = useCart();
   const [product, setProduct] = useState(null);
   const [size, setSize] = useState('');
+  const [color, setColor] = useState('');
+  const [quantity, setQuantity] = useState(1);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [adding, setAdding] = useState(false);
@@ -20,7 +22,13 @@ export default function ProductDetailPage() {
   const buttonTimer = useRef(null);
   const toastTimer = useRef(null);
   const addLock = useRef(false);
-  useEffect(() => { api(`/products/${id}`).then(setProduct).catch((err) => setError(err.message)); }, [id]);
+  useEffect(() => {
+    api(`/products/${id}`).then((item) => {
+      setProduct(item);
+      setColor(item.colors?.[0] || '');
+      setQuantity(1);
+    }).catch((err) => setError(err.message));
+  }, [id]);
   useEffect(() => () => {
     clearTimeout(buttonTimer.current);
     clearTimeout(toastTimer.current);
@@ -28,24 +36,29 @@ export default function ProductDetailPage() {
   async function addItem() {
     if (!user) { navigate('/login'); return; }
     if (!size) { setMessage('Choose a size to continue.'); return; }
+    if (!color) { setMessage('Choose a color to continue.'); return; }
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > product.stock) { setMessage('Choose a valid quantity.'); return; }
     if (addLock.current) return;
     addLock.current = true;
     clearTimeout(buttonTimer.current);
     clearTimeout(toastTimer.current);
     setAdding(true);
     setAdded(true);
+    setShowSuccess(true);
+    buttonTimer.current = setTimeout(() => {
+      addLock.current = false;
+      setAdded(false);
+    }, 3000);
+    toastTimer.current = setTimeout(() => setShowSuccess(false), 3000);
     setMessage('');
     setError('');
     try {
-      await add(product._id, size);
+      await add(product._id, size, color, quantity);
       setAdding(false);
-      setShowSuccess(true);
-      buttonTimer.current = setTimeout(() => {
-        addLock.current = false;
-        setAdded(false);
-      }, 5000);
-      toastTimer.current = setTimeout(() => setShowSuccess(false), 5000);
     } catch (err) {
+      clearTimeout(buttonTimer.current);
+      clearTimeout(toastTimer.current);
+      setShowSuccess(false);
       setAdding(false);
       setAdded(false);
       addLock.current = false;
@@ -62,6 +75,10 @@ export default function ProductDetailPage() {
       <p className="muted">{product.description}</p>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 28 }}><strong>Select size</strong><span className="muted">EU</span></div>
       <div className="size-grid">{product.sizes.map((item) => <button type="button" className={`size-button ${size === item ? 'selected' : ''}`} onClick={() => setSize(item)} key={item}>{item.replace('EU ', '')}</button>)}</div>
+      <div className="product-options">
+        <label>Color<select value={color} onChange={(event) => setColor(event.target.value)}>{(product.colors || []).map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+        <label>Quantity<input type="number" min="1" max={product.stock} step="1" value={quantity} onChange={(event) => setQuantity(event.target.value === '' ? '' : Number(event.target.value))} /></label>
+      </div>
       <p className="muted">{product.stock > 0 ? `${product.stock} available` : 'Out of stock'}</p>
       {message && <p className="notice success">{message}</p>}{error && <p className="notice">{error}</p>}
       <button className="button button-dark button-block" disabled={product.stock < 1 || adding || added} onClick={addItem}>{product.stock < 1 ? 'Out of Stock' : added ? 'Added to Bag ✓' : 'Add to Bag'}</button>

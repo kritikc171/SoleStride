@@ -28,6 +28,7 @@ function productFields(body, image) {
     price: Number(body.price),
     description: body.description?.trim(),
     sizes: Array.isArray(body.sizes) ? body.sizes : String(body.sizes || '').split(',').map((size) => size.trim()).filter(Boolean),
+    colors: Array.isArray(body.colors) ? body.colors : String(body.colors || '').split(',').map((color) => color.trim()).filter(Boolean),
     stock: Number(body.stock),
     isFeatured: body.isFeatured === true || body.isFeatured === 'true',
     ...(image ? { image: `/uploads/${image.filename}` } : {})

@@ -20,7 +20,7 @@ export async function placeOrder(req, res, next) {
       if (!product || product.stock < line.quantity) {
         return res.status(400).json({ success: false, message: `${line.product?.name || 'A product'} is no longer available in that quantity` });
       }
-      items.push({ product: product._id, name: product.name, image: product.image, size: line.size, price: product.price, quantity: line.quantity });
+      items.push({ product: product._id, name: product.name, image: product.image, size: line.size, color: line.color || 'Black', price: product.price, quantity: line.quantity });
       totalAmount += product.price * line.quantity;
     }
     for (const item of items) {

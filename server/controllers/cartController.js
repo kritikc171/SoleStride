@@ -11,16 +11,19 @@ export async function getCart(req, res, next) {
 
 export async function addToCart(req, res, next) {
   try {
-    const { productId, size, quantity = 1 } = req.body;
+    const { productId, size, color, quantity = 1 } = req.body;
     const product = await Product.findById(productId);
     if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
     const count = Number(quantity);
-    if (!size || !product.sizes.includes(size) || !Number.isInteger(count) || count < 1) return res.status(400).json({ success: false, message: 'Select a valid size and quantity' });
+    if (!size || !product.sizes.includes(size) || !color || !product.colors.includes(color) || !Number.isInteger(count) || count < 1) return res.status(400).json({ success: false, message: 'Select a valid size, color, and quantity' });
     const cart = await Cart.findOneAndUpdate({ user: req.user.id }, { $setOnInsert: { user: req.user.id } }, { new: true, upsert: true });
-    const line = cart.items.find((item) => item.product.toString() === productId && item.size === size);
-    if (product.stock < count + (line?.quantity || 0)) return res.status(400).json({ success: false, message: 'Not enough stock available' });
+    const line = cart.items.find((item) => item.product.toString() === productId && item.size === size && item.color === color);
+    const productCount = cart.items
+      .filter((item) => item.product.toString() === productId)
+      .reduce((total, item) => total + item.quantity, 0);
+    if (product.stock < count + productCount) return res.status(400).json({ success: false, message: 'Not enough stock available' });
     if (line) line.quantity += count;
-    else cart.items.push({ product: productId, size, quantity: count });
+    else cart.items.push({ product: productId, size, color, quantity: count });
     await cart.save();
     await logActivity({ actor: req.user, action: 'CART_UPDATED', details: `Added ${product.name} to the bag`, entityId: product.id });
     await cart.populate('items.product');
@@ -36,7 +39,10 @@ export async function updateCartItem(req, res, next) {
     const item = cart?.items.id(req.params.itemId);
     if (!item) return res.status(404).json({ success: false, message: 'Bag item not found' });
     const product = await Product.findById(item.product);
-    if (!product || product.stock < quantity) return res.status(400).json({ success: false, message: 'Not enough stock available' });
+    const otherProductQuantity = cart.items
+      .filter((cartItem) => cartItem.id !== item.id && cartItem.product.toString() === item.product.toString())
+      .reduce((total, cartItem) => total + cartItem.quantity, 0);
+    if (!product || product.stock < otherProductQuantity + quantity) return res.status(400).json({ success: false, message: 'Not enough stock available' });
     item.quantity = quantity;
     await cart.save();
     await logActivity({ actor: req.user, action: 'CART_UPDATED', details: `Updated a bag item quantity to ${quantity}`, entityId: item.product.toString() });

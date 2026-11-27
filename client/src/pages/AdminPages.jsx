@@ -17,7 +17,7 @@ export function AdminDashboardPage() {
   return <AdminLayout><h1>Dashboard</h1>{error && <div className="notice">{error}</div>}{!data && !error ? <p className="loading">Loading dashboard…</p> : <div className="kpi-grid">{Object.entries(data || {}).map(([key, value]) => <div className="kpi" key={key}><span className="muted">{key[0].toUpperCase() + key.slice(1)}</span><strong>{value}</strong></div>)}</div>}<h2>Recent activity</h2>{recent.length ? recent.map((item) => <div className="summary-line" key={item._id}><span><strong>{item.action}</strong> · {item.details}<br /><span className="muted">{item.actorName}</span></span><span className="muted">{new Date(item.createdAt).toLocaleDateString()}</span></div>) : !error && <p className="muted">No activity yet.</p>}</AdminLayout>;
 }
 
-const blankProduct = { name: '', category: 'Men', price: '', description: '', sizes: 'EU 38, EU 39, EU 40, EU 41, EU 42', stock: 0, isFeatured: false };
+const blankProduct = { name: '', category: 'Men', price: '', description: '', sizes: 'EU 38, EU 39, EU 40, EU 41, EU 42', colors: 'Black, White', stock: 0, isFeatured: false };
 export function AdminProductsPage() {
   const [products, setProducts] = useState([]);
   const [form, setForm] = useState(blankProduct);
@@ -29,7 +29,7 @@ export function AdminProductsPage() {
   useEffect(() => { load(); }, []);
   function edit(product) {
     setEditing(product._id);
-    setForm({ ...product, sizes: product.sizes.join(', '), isFeatured: product.isFeatured, image: product.image });
+    setForm({ ...product, sizes: product.sizes.join(', '), colors: (product.colors || ['Black', 'White']).join(', '), isFeatured: product.isFeatured, image: product.image });
     setIsOpen(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
@@ -54,6 +54,7 @@ export function AdminProductsPage() {
     <label>Price (NPR)<input name="price" type="number" min="0" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} required /></label>
     <label>Description<textarea name="description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} required /></label>
     <label>Sizes (comma separated)<input name="sizes" value={form.sizes} onChange={(e) => setForm({ ...form, sizes: e.target.value })} required /></label>
+    <label>Colors (comma separated)<input name="colors" value={form.colors} onChange={(e) => setForm({ ...form, colors: e.target.value })} required /></label>
     <label>Stock<input name="stock" type="number" min="0" value={form.stock} onChange={(e) => setForm({ ...form, stock: e.target.value })} required /></label>
     <label>Product image<input name="image" type="file" accept=".jpg,.jpeg,.png,.webp,.svg,image/jpeg,image/png,image/webp,image/svg+xml" required={!editing} /></label>
     <label style={{ display: 'flex', alignItems: 'center' }}><input name="isFeatured" type="checkbox" checked={Boolean(form.isFeatured)} onChange={(e) => setForm({ ...form, isFeatured: e.target.checked })} /> Featured</label>

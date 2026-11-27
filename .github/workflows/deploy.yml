@@ -168,7 +168,7 @@ jobs:
           script: |
             set -eu
             if ! sudo cloud-init status --wait; then
-              sudo cloud-init status --long || echo "cloud-init status is non-zero; collecting bootstrap logs."
+              sudo cloud-init status --long
               for log in \
                 /var/log/user-data.log \
                 /var/log/cloud-init-output.log \

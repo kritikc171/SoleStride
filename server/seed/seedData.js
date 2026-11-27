@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import User from '../models/User.js';
 import Product from '../models/Product.js';
+import connectDB from '../config/db.js';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const uploadDir = path.resolve(root, '../uploads');
@@ -27,8 +28,7 @@ function shoeArtwork(name, color, index) {
 }
 
 try {
-  if (!process.env.MONGO_URI) throw new Error('MONGO_URI is required');
-  await mongoose.connect(process.env.MONGO_URI);
+  await connectDB();
   await fs.mkdir(uploadDir, { recursive: true });
   const adminPassword = await bcrypt.hash('Admin@123', 10);
   const userPassword = await bcrypt.hash('User@123', 10);
